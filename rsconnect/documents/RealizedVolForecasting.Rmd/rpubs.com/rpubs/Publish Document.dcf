@@ -1,0 +1,7 @@
+name: Publish Document
+account: rpubs
+server: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/217044/b994678e0e1d4c82bc91125c63477289
+bundleId: https://api.rpubs.com/api/v1/document/217044/b994678e0e1d4c82bc91125c63477289
+url: http://rpubs.com/ericwbzhang/217044
+when: 1476055038.39176
