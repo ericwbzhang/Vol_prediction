@@ -1,0 +1,402 @@
+---
+title: "SPX Realized Volatility Forecasting"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+
+# Introduction
+
+This article compares several time series model to forecast the daily realized volatility of SP 500 index. The benchmark is ARMA-EGARCH model for SPX daily return series. It is compared to the realized GARCH model of [Hansen, Huang and Shek(2012)](http://public.econ.duke.edu/~get/browse/courses/201/spr12/DOWNLOADS/WorkingPapers_Now_Published/phs_realized_garch_10.pdf). Finally, an esemble forecasting algorithm is developed. 
+
+
+## Assumption
+
+The realized volatility is invisible so we can only estimate it. This is also the hard part for volatility modeling. It is difficult to judge the forecasting quality if the true value is unknown. Nevertheless, researchers develop estimators for the realized volatility.[Andersen, Bollerslev Diebold (2008)](http://www.ssc.upenn.edu/~fdiebold/papers/paper50/abd071102.pdf) and [Barndorff-Nielsen and Shephard (2007)](http://www.economics.ox.ac.uk/Research/wp/pdf/paper240.pdf) and [Shephard and Sheppard (2009)](http://www.economics.ox.ac.uk/research/WP/pdf/paper438.pdf) proposed a class of high frequency based volatility (HEAVY) models.
+
+**Assumption: The HEAVY realized volatility estimator is unbiased and efficient. There is no model misspecification.**
+
+In the following, HEAVY estimator is taken as *observed realized volatility* to determine the forecasting performance. 
+
+## Source of Information
+
++ SPX daily data (close-close return)
++ SPX intraday high frequency data (HEAVY model estimation)
++ VIX 
++ VIX derivatives (VIX futures)
+
+In this article, I mainly focus on the first two. 
+
+## Data Collection
+
+### Realized Volatility Estimation and Daily Return
+
+   Oxford-Man Institute of Quantitative Finance maintains a [Realized Library](http://realized.oxford-man.ox.ac.uk/) which publishs the real-time daily realized volatility estimation for equity indices and commodities. I take their publishment as the source of SPX realized volatility estimation and daily return. 
+  
+```{r include= FALSE}
+setwd('/Users/Eric/Documents/Vol_prediction')
+```
+```{r setup, include=FALSE}
+opts_chunk$set(dev= 'pdf')
+
+```
+
+
+```{r echo=TRUE }
+library(lubridate)
+SPXdata<- read.csv('SPX_rvol.csv')
+rownames(SPXdata)<- ymd( SPXdata$DATE) 
+SPXdata$SPX2.rvol<- sqrt(SPXdata$SPX2.rv)
+head( SPXdata)
+```
+
+`SPXdata$SPX2.rv` is estimated realized variance. `SPXdata$SPX2.r` is the daily return (close-close). `SPXdata$SPX2.rvol` is the estimated realized volatility
+
+```{r, fig.width= 10,  fig.height= 8 }
+library(ggplot2)
+# g<- ggplot(SPXdata, aes(x= DATE, y= SPX2.rvol, group= 1))+
+#   geom_line()
+# g
+plot( x= SPXdata$DATE, y= SPXdata$SPX2.rvol, 
+      type = 'n',
+      xlab='DATE',
+      ylab= 'daily realized vol')
+lines(SPXdata$DATE, SPXdata$SPX2.rvol)
+```
+`SPXdata$SPX2.rvol` plot. 
+
+
+# Benchmark: SPX daily ret modeling 
+
+## ARMA-eGARCH 
+
+Given the daily return with the belief of heteroskedasticity in conditional variance, GARCH model can be the benchmark for fitting and forecasting.
+
+First, the return series is stationary
+```{r}
+library(tseries)
+adf.test( SPXdata$SPX2.r)
+```
+
+The return distribution shows an extra kurtosis and fat tail. It can be approximated by a scaled t-distribution 
+```{r}
+library(MASS)
+t.pars<-fitdistr(SPXdata$SPX2.r, densfun = 't', start= list(m=0,s= 0.01 ,df= 1))
+plot(density(SPXdata$SPX2.r), xlim= c(-.1,.1), ylim=c(-1, 55) ,
+     xlab='',
+     ylab='',
+     main='')
+par(new=TRUE)
+curve( dt( (x- t.pars$estimate[1])/t.pars$estimate[2], 
+           df= t.pars$estimate[3])/ t.pars$estimate[2],
+       from= -.1,
+       to= .1, xlim= c(-.1,.1), 
+       ylim=c (-1, 55),
+       col= 'green',
+       xlab= 'ret',
+       ylab= 'density',
+       main= '')
+```
+Return distribution density plot. Black line is the kernal-smoothed density and green line is the scaled t-distribution density.
+```{r echo=TRUE}
+
+acf(SPXdata$SPX2.r) ## acf plot
+```
+```{r }
+library(tseries)
+Box.test(SPXdata$SPX2.r, type= 'Ljung-Box')
+```
+The autocorrelation plot shows some week correlation in return series. The Ljung-Box test confirms the suspect. 
+```{r echo=TRUE}
+library(forecast)
+auto.arima(SPXdata$SPX2.r)
+```
+`auro.arima` indicates ARIMA(2,0,0) to model the autocorrelation in return series, and eGARCH(1,1) is popular for volatility modeling. So I choose the ARMA(2,0)-eGARCH(1,1) with t-distribution error, as the benchmark model.
+
+```{r }
+load('egarch_model')
+```
+```{r echo=TRUE}
+egarch_model$spec
+```
+
+With 4189 observations for return (from 2000-01-03 to 2016-10-06), I train the model with the first 1000 observations, then rolling-forecast one ahead each time, and re-estimate the model every 5 observations (roughly 1 week in calendar). The **out-of-sample** forecasting and corresponding realization is in the following plot.
+
+```{r}
+egarch_model$plot
+```
+
+
+The prediction shows a strong correlation to realization, more than 83%. 
+
+```{r echo=TRUE}
+cor( egarch_model$roll.pred$realized_vol, egarch_model$roll.pred$egarch.predicted_vol)
+```
+
+The error summary and plot
+
+```{r}
+summary(egarch_model$roll.pred$realized_vol- 
+          egarch_model$roll.pred$egarch.predicted_vol)
+```
+
+
+```{r}
+library(lubridate)
+plot( x= ymd(egarch_model$roll.pred$x), 
+      y= egarch_model$roll.pred$realized_vol- egarch_model$roll.pred$egarch.predicted_vol,
+      type= 'p',
+      pch='.',
+      xlab= 'date',
+      ylab='',
+      main='ARMA(2,0)-EGARCH(1,1) prediction error')
+```
+
+
+The mean squre of error (MSE): 
+```{r }
+egarch_model$MSE
+```
+
+*For details of the R code, check `GARCH.R`*
+
+# Improvement: Realized GARCH Model and Long Range Dependence(LRD) Modeling 
+
+
+## Realized GARCH 
+
+`realGARCH` model is proposed by [Hansen, Huang and Shek (2012)](http://public.econ.duke.edu/~get/browse/courses/201/spr12/DOWNLOADS/WorkingPapers_Now_Published/phs_realized_garch_10.pdf) (HHS2012) which relates the realized volatility measure to the latent *true volatility* using a representation with asymmetric dynamics. Unlike the standard GARCH model, it is a joint modeling of returns and realized volatility measure(HEAVY estimator in this article). The asymmetric reaction to shocks also makes for a flexible and rich representation. 
+
+Formally:
+
+$$
+y_t= \mu_t + \sigma_t z_t, z_t \sim iid(0,1) \\
+log \sigma_t^2= \omega+ \sum_{i=1} ^ q \alpha_i log r_{t-i}+ \sum_{i=1} ^p \beta_i log \sigma_{t-1} ^2 \\
+log r_t= \xi + \delta log \sigma^2 _t + \tau (z_t)+ u_t, u_t \sim N(0, \lambda) 
+$$
+
+It defines the dynamics of return $y_t$, the latent conditional variance $\sigma_t ^2$ and realized variance measure $r_t$. The asymmetric reaction comes via $\tau(.)$
+
+$$
+\tau(z_t)= \eta_1 z_t+ \eta_2 (z_t^2 -1)
+$$
+which has nice property $E \tau(z_t)=0$. This function also forms the basis for the creation of a type of news impact curve $\nu(z)$
+
+$$
+\nu(z)= E[log \sigma_t | z_{t-1}=z] - E[log \sigma_t]= \delta \nu(z)
+$$
+
+so $\nu(z)$ is the change in volatility as a function of the standartized innovations. 
+
+The model specification:
+
+```{r}
+load('rgarch_model')
+rgarch_model$spec
+```
+
+
+The rolling-forecast procedure is the same as that of ARMA-EGARCH model above. The **out-of-sample** forecasting and corresponding realization is in the following plot.
+
+```{r}
+rgarch_model$plot
+
+```
+
+The correlation of forecasting and realization is more than 84%
+
+```{r echo=TRUE}
+cor( rgarch_model$roll.pred$realized_vol, rgarch_model$roll.pred$rgarch.prediction_vol)
+```
+
+
+The error summary and plot:
+```{r}
+summary(rgarch_model$roll.pred$realized_vol-
+          rgarch_model$roll.pred$arfima_egarch.predicted_vol)
+
+plot( x= ymd(rgarch_model$roll.pred$x), 
+      y= rgarch_model$roll.pred$realized_vol- rgarch_model$roll.pred$rgarch.prediction_vol,
+      type= 'p',
+      pch='.',
+      xlab= 'date',
+      ylab='',
+      main='realGARCH prediction error')
+```
+
+
+The mean square of error (MSE):
+```{r}
+rgarch_model$MSE
+```
+
+
+*For more details of the R code, check `rGARCH.r`*
+
+
+## The LRD modeling: ARFIMA(0,d,0)-eGARCH(1,1)
+
+Since the realized volatility is *"known"*, another idea is to model the realized volatility directly. 
+
+The realized volatility acf plot shows a very slow decay in autocorrelation. 
+```{r echo=TRUE}
+acf( SPXdata$SPX2.rvol, lag= 300)
+
+```
+
+The double rejection of `adf.test` and `kpss.test` suggests a significant long range dependence (LRD) in the realized volatility series. 
+
+```{r}
+adf.test(SPXdata$SPX2.rvol)
+kpss.test(SPXdata$SPX2.rvol, null= 'Level')
+```
+
+To model the characteristics of LRD, fractional-ARIMA(ARFIMA) model would be a good choice. The model selection based on AICc criteria suggests ARFIMA(0,d,0). So I model the realized volatility by ARFIMA(0,d,0)-eGARCH(1,1).
+
+The model specification:
+
+```{r}
+load('arfima_egarch_model')
+arfima_egarch_model$spec
+```
+
+The rolling-forecast procedure is the same as that of ARMA-EGARCH model above. The **out-of-sample** forecasting and corresponding realization is in the following plot.
+
+```{r}
+arfima_egarch_model$plot
+
+```
+
+The correlation of forecasting and realization is more than 84%
+
+```{r echo=TRUE}
+cor( arfima_egarch_model$roll.pred$realized_vol, arfima_egarch_model$roll.pred$arfima_egarch.predicted_vol)
+```
+
+The error summary and plot:
+```{r}
+summary(arfima_egarch_model$roll.pred$realized_vol-
+          arfima_egarch_model$roll.pred$arfima_egarch.predicted_vol)
+
+plot( x= ymd(arfima_egarch_model$roll.pred$x), 
+      y= arfima_egarch_model$roll.pred$realized_vol- arfima_egarch_model$roll.pred$arfima_egarch.predicted_vol,
+      type= 'p',
+      pch='.',
+      xlab= 'date',
+      ylab='',
+      main='ARFIMA(0,d,0)-EGARCH(1,1) prediction error')
+```
+
+
+The mean square of error (MSE):
+```{r}
+arfima_egarch_model$MSE
+```
+*For more details about the R code, check `rVol_fARIMA.R`*
+
+**Remark:**
+
++ The ARMA-eGARCH model for daily return series and ARFIMA-eGARCH model for realized volatility utilize different information sources. ARMA-eGARCH model only involves the daily return, while the ARFIMA-eGARCH model is based on HEAVY estimator, which is computed from intraday tick data. RealGARCH model combines them.
+
++ ARFIMA-eGARCH model is slightly better performed than realGARCH model, measured by mean squared error. It is probably due to the feature of LRD of ARFIMA-eGARCH model. 
+
+
+# Ensemble Model
+
+## Random Forest Ensemble
+
+Now three forecasting have been constructed
+
++ ARMA-eGARCH `egarch_model`
++ realGARCH `rgarch model`
++ ARFIMA-eGARCH `arfima_egarch_model`
+
+The model average is expected to reduce forecasting variance, so to improve accuracy, though these three forecasting shows high correlation. The random forest ensemble is employed. 
+
+```{r}
+load('rf')
+library(randomForest)
+rf$model$call
+varImpPlot(rf$model)
+
+```
+
+The forest consists of 500 trees, and each tree randomly select 2 forecasting to fit the realizatoin. The following plot is the out-of-bag fitting and realization. 
+
+```{r}
+rf$plot
+```
+
+The correlation of forecasting and realizatoin:
+
+```{r}
+cor(rf$roll.pred$reallized_vol, rf$roll.pred$rf.predicted_vol)
+```
+
+
+The error plot:
+
+
+```{r}
+library(lubridate)
+plot( x= ymd(rf$roll.pred$x), 
+      y= rf$roll.pred$reallized_vol- rf$roll.pred$rf.predicted_vol,
+      type= 'p',
+      pch='.',
+      xlab= 'date',
+      ylab='',
+      main='RF_Ensemble prediction error')
+
+```
+
+The mean square error:
+```{r}
+mean( (rf$roll.pred$reallized_vol-rf$roll.pred$rf.predicted_vol)^2)
+```
+
+
+# Remarks
+
+The realGARCH model and ARFIMA-eGARCH model which involve the information of realized measure out-performs the standard ARMA-eGARCH model of return series. The MSE of random forest ensemble shrinked by more than 17% compared to the benchmark.
+
+From the view of information source, the realGARCH model and ARFIMA-eGARCH model capture the incremental information in the intraday high frequency data ( by model the HEAVY realized volatility estimator)
+
+## Further Development: the Implied Volatility
+
+The above methods do not involve the implied volatility data. 
+Implied Volatility is computed from SPX European options. A natural perception is to treat implied volatility as a predictor to forward realized volatility. However, much research shows that VIX, the model free implied volatility is a biased estimator and not as efficient as the forecasts based on past realized volatility. [Torben G. Andersen, Per Frederiksen and Arne D. Staal (2007)](http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.466.2288&rep=rep1&type=pdf) agree with this view. Their work shows that the introduction of implied volatility to time series analysis frame work gives no significant benefit. However the authors point out the possibility of incremental information in the implied volatility, and suggest a combination model. 
+
+So the further development may be an ensemble model which combines the time series forecasting and the prediction information in implied volatility (if there is). 
+
+
+<!-- I take the distribution from Quandl as the source of [VIX](https://www.quandl.com/data/CBOE/VIX-Volatility-Index), [SKEW](https://www.quandl.com/data/CBOE/SKEW-S-P-500-SKEW-Index) and [VIX Future](https://www.quandl.com/data/CHRIS?keyword=VX) data. -->
+
+<!-- ```{r, echo=TRUE} -->
+<!-- VX<- read.csv('VX.csv') -->
+<!-- head(VX) -->
+<!-- ``` -->
+<!-- Note: The `VX$VX` variables are the characteristics of continuous VIX future contracts. It applies the last-day rolling strategy.  -->
+
+<!-- `VX$VX.C1_0` is the contango of first VIX future and VIX index. `VX$VX.C2_1` is the contango of second and first VIX future. `VX$VXC5_2` is the contango of fifth and second VIX future. They are measured in percentage difference.  -->
+
+
+
