@@ -2,6 +2,7 @@
 title: "SPX Realized Volatility Forecasting"
 date: "`r Sys.Date()`"
 output:
+  pdf_document:
   rmdformats::readthedown:
     highlight: kate
 ---
@@ -373,6 +374,11 @@ The mean square error:
 mean( (rf$roll.pred$reallized_vol-rf$roll.pred$rf.predicted_vol)^2)
 ```
 
+The ratio of MSE to the variance of realized volatility
+
+```{r}
+rf$MSE/ var( rf$roll.pred$reallized_vol)
+```
 
 # Remarks
 

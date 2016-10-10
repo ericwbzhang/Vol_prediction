@@ -2,7 +2,7 @@
 rm(list=ls())
 
 library(lubridate)
-setwd('/Users/Eric/Desktop/Vol_prediction')
+setwd('/Users/Eric/Documents/Vol_prediction')
 SPXdata<- read.csv('SPX_rvol.csv')
 rownames(SPXdata)<- ymd( SPXdata$DATE)
 SPXdata$SPX2.rvol<- sqrt(SPXdata$SPX2.rv)
