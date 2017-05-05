@@ -73,6 +73,8 @@ library(randomForest)
 
 
 ## rf ensemble the time series forecasting to get an average
+rownames(forecasting)<- forecasting$DATE
+forecasting$DATE<- NULL
 
 ensemble_rf<- randomForest(real~.,
                            data = forecasting,

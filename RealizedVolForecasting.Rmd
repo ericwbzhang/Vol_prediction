@@ -2,7 +2,6 @@
 title: "SPX Realized Volatility Forecasting"
 date: "`r Sys.Date()`"
 output:
-  pdf_document:
   rmdformats::readthedown:
     highlight: kate
 ---
@@ -27,16 +26,16 @@ opts_knit$set(width=75)
 
 # Introduction
 
-This article compares several time series model to forecast the daily realized volatility of SP 500 index. The benchmark is ARMA-EGARCH model for SPX daily return series. It is compared to the realized GARCH model of [Hansen, Huang and Shek(2012)](http://public.econ.duke.edu/~get/browse/courses/201/spr12/DOWNLOADS/WorkingPapers_Now_Published/phs_realized_garch_10.pdf). Finally, an esemble forecasting algorithm is developed. 
+This article compares several time series model to forecast the daily realized volatility of SP 500 index. The benchmark is ARMA-EGARCH model for SPX daily return series. It is compared to the realized GARCH model of [Hansen, Huang and Shek(2012)](http://public.econ.duke.edu/~get/browse/courses/201/spr12/DOWNLOADS/WorkingPapers_Now_Published/phs_realized_garch_10.pdf). At last, an esemble forecasting algorithm is developed. 
 
 
 ## Assumption
 
-The realized volatility is invisible so we can only estimate it. This is also the hard part for volatility modeling. It is difficult to judge the forecasting quality if the true value is unknown. Nevertheless, researchers develop estimators for the realized volatility.[Andersen, Bollerslev Diebold (2008)](http://www.ssc.upenn.edu/~fdiebold/papers/paper50/abd071102.pdf) and [Barndorff-Nielsen and Shephard (2007)](http://www.economics.ox.ac.uk/Research/wp/pdf/paper240.pdf) and [Shephard and Sheppard (2009)](http://www.economics.ox.ac.uk/research/WP/pdf/paper438.pdf) proposed a class of high frequency based volatility (HEAVY) models.
+The realized volatility is invisible so we can only estimate it. This is also the hard part for volatility modeling. It is difficult to judge the forecasting quality if the true value is unknown. Nevertheless, researchers develop estimators for the realized volatility.[Andersen, Bollerslev Diebold (2008)](http://www.ssc.upenn.edu/~fdiebold/papers/paper50/abd071102.pdf) and [Barndorff-Nielsen and Shephard (2007)](http://www.economics.ox.ac.uk/Research/wp/pdf/paper240.pdf) and [Shephard and Sheppard (2009)](http://www.economics.ox.ac.uk/research/WP/pdf/paper438.pdf) proposed a class of high frequency based volatility (HEAVY) models.The authors argues that HEAVY models give a _good_ estimator. 
 
 **Assumption: The HEAVY realized volatility estimator is unbiased and efficient. There is no model misspecification.**
 
-In the following, HEAVY estimator is taken as *observed realized volatility* to determine the forecasting performance. 
+In the following, HEAVY estimator is accepted as *observed realized volatility* to determine the forecasting performance. 
 
 ## Source of Information
 
@@ -51,9 +50,13 @@ In this article, I mainly focus on the first two.
 
 ### Realized Volatility Estimation and Daily Return
 
-   Oxford-Man Institute of Quantitative Finance maintains a [Realized Library](http://realized.oxford-man.ox.ac.uk/) which publishs the real-time daily realized volatility estimation for equity indices and commodities. I take their publishment as the source of SPX realized volatility estimation and daily return. 
+   
+   I implement Shephard and Sheppard's model and estimate the realized vol of SPX. 
   
 ```{r include= FALSE}
+
+# Oxford-Man Institute of Quantitative Finance maintains a [Realized Library](http://realized.oxford-man.ox.ac.uk/) which publishs the real-time daily realized volatility estimation for equity indices and commodities. I take their publishment as the source of SPX realized volatility estimation and daily return. 
+
 setwd('/Users/Eric/Documents/Vol_prediction')
 ```
 ```{r setup, include=FALSE}
@@ -147,10 +150,10 @@ egarch_model$plot
 ```
 
 
-The prediction shows a strong correlation to realization, more than 83%. 
+The prediction shows a strong correlation to realization, more than 72%. 
 
 ```{r echo=TRUE}
-cor( egarch_model$roll.pred$realized_vol, egarch_model$roll.pred$egarch.predicted_vol)
+cor( egarch_model$roll.pred$realized_vol, egarch_model$roll.pred$egarch.predicted_vol, method = 'spearman')
 ```
 
 The error summary and plot
@@ -223,10 +226,10 @@ rgarch_model$plot
 
 ```
 
-The correlation of forecasting and realization is more than 84%
+The correlation of forecasting and realization is more than 77%
 
 ```{r echo=TRUE}
-cor( rgarch_model$roll.pred$realized_vol, rgarch_model$roll.pred$rgarch.prediction_vol)
+cor( rgarch_model$roll.pred$realized_vol, rgarch_model$roll.pred$rgarch.prediction_vol, method = 'spearman')
 ```
 
 
@@ -287,10 +290,10 @@ arfima_egarch_model$plot
 
 ```
 
-The correlation of forecasting and realization is more than 84%
+The correlation of forecasting and realization is more than 77%
 
 ```{r echo=TRUE}
-cor( arfima_egarch_model$roll.pred$realized_vol, arfima_egarch_model$roll.pred$arfima_egarch.predicted_vol)
+cor( arfima_egarch_model$roll.pred$realized_vol, arfima_egarch_model$roll.pred$arfima_egarch.predicted_vol, method = 'spearman')
 ```
 
 The error summary and plot:
@@ -333,7 +336,7 @@ Now three forecasting have been constructed
 
 The model average is expected to reduce forecasting variance, so to improve accuracy, though these three forecasting shows high correlation. The random forest ensemble is employed. 
 
-```{r}
+```{r echo=T}
 load('rf')
 library(randomForest)
 rf$model$call
